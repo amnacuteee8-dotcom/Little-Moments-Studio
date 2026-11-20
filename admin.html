@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ff72ad">
+<title>Little Moments — Private Admin</title>
+<style>
+:root{--pink:#ff6fae;--ink:#49334b}
+*{box-sizing:border-box}body{margin:0;padding:20px;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:var(--ink);background:linear-gradient(135deg,#fff4fa,#fff9ed 48%,#f4efff);min-height:100vh}
+main{max-width:1050px;margin:auto}.top,.order{background:#fff;border:1px solid #ffe0ef;border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 10px 28px #bd86b51c}
+h1,h2{color:#d94b91;margin-top:0}button,select{border:0;border-radius:999px;padding:12px 17px;background:linear-gradient(100deg,#ff69a8,#a78bfa);color:#fff;font-weight:800;font-size:15px}
+button:disabled{opacity:.55}.muted{color:#826d82;line-height:1.5}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.order-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}.field{overflow-wrap:anywhere;padding:8px;background:#fff8fc;border-radius:10px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions button{font-size:14px}.status{padding:12px;border-radius:12px;background:#fff3db;margin:12px 0}.danger{background:#8c3d58}#orders{margin-top:18px}
+</style>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+</head>
+<body><main>
+<section class="top">
+ <h1>Little Moments — Admin ♡</h1>
+ <p class="muted">Private order dashboard. Only the approved Google account can access customer records and private files.</p>
+ <div class="row"><button id="login">Sign in with Google</button><button id="refresh" hidden>Refresh orders</button><button id="logout" hidden>Sign out</button><strong id="who"></strong></div>
+ <div id="notice" class="status" role="status">Checking admin sign-in…</div>
+</section>
+<section id="orders"></section>
+</main>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDjvqrKakYSqwbMFXKqIPzjAG7SJlAVv5U",
+  authDomain: "little-moments-studio.firebaseapp.com",
+  projectId: "little-moments-studio",
+  storageBucket: "little-moments-studio.firebasestorage.app",
+  messagingSenderId: "796804112317",
+  appId: "1:796804112317:web:0bcf4f8cd2a5a8559e3cd4",
+  measurementId: "G-HKT8GRF247"
+};
+const ADMIN_EMAIL="amna.cuteee8@gmail.com";
+const SIGNED_URL_API="/api/signed-url";
+if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth(),db=firebase.firestore();
+const notice=document.getElementById('notice'),ordersEl=document.getElementById('orders');
+const loginBtn=document.getElementById('login'),refreshBtn=document.getElementById('refresh'),logoutBtn=document.getElementById('logout');
+const googleProvider=new firebase.auth.GoogleAuthProvider();
+googleProvider.setCustomParameters({prompt:'select_account'});
+function say(msg){notice.textContent=msg;}
+loginBtn.addEventListener('click',async()=>{
+ try{await auth.signInWithRedirect(googleProvider);}catch(e){say('Google sign-in failed: '+e.message);}
+});
+logoutBtn.addEventListener('click',()=>auth.signOut());
+refreshBtn.addEventListener('click',loadOrders);
+auth.getRedirectResult().catch(e=>say('Google sign-in error: '+e.message));
+auth.onAuthStateChanged(async user=>{
+ if(!user){loginBtn.hidden=false;refreshBtn.hidden=true;logoutBtn.hidden=true;document.getElementById('who').textContent='';ordersEl.replaceChildren();say('Please sign in with the approved Google account.');return;}
+ if((user.email||'').toLowerCase()!==ADMIN_EMAIL || !user.emailVerified){
+   await auth.signOut();say('Access denied. This Google account is not an approved admin.');return;
+ }
+ loginBtn.hidden=true;refreshBtn.hidden=false;logoutBtn.hidden=false;
+ document.getElementById('who').textContent=user.email;
+ await loadOrders();
+});
+async function signedFile(path,label){
+ const user=auth.currentUser;
+ const token=await user.getIdToken();
+ const res=await fetch(SIGNED_URL_API,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({path})});
+ if(!res.ok)throw new Error('Could not create secure link for '+label+' ('+res.status+').');
+ const data=await res.json();
+ if(!data.signedURL)throw new Error('No signed URL returned for '+label+'.');
+ return data.signedURL.startsWith('http')?data.signedURL:(`https://qjqjkjfjodgqjzllmiad.supabase.co${data.signedURL}`);
+}
+function make(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
+async function loadOrders(){
+ ordersEl.replaceChildren();say('Loading orders…');
+ try{
+  const snap=await db.collection('orders').orderBy('createdAt','desc').limit(100).get();
+  if(snap.empty){say('No orders have been submitted yet.');return;}
+  say(`${snap.size} most recent order(s) loaded.`);
+  snap.forEach(doc=>{
+   const d=doc.data(),card=make('article',undefined,'order');
+   card.append(make('h2',`${d.gift||'Gift order'} — ${d.status||'pending'}`));
+   const grid=make('div',undefined,'order-grid');
+   const entries=[['Order ID',doc.id],['Customer',d.buyer],['Email',d.email],['Recipient',d.recipient],['Gift',d.gift],['Message',d.message||'—'],['Created',d.createdAt&&d.createdAt.toDate?d.createdAt.toDate().toLocaleString():'—']];
+   entries.forEach(([k,v])=>grid.append(make('div',`${k}: ${v||'—'}`,'field')));
+   card.append(grid);
+   const actions=make('div',undefined,'actions');
+   const status=make('select');['pending','reviewing','paid','completed','rejected'].forEach(v=>{const o=make('option',v);o.value=v;if((d.status||'pending')===v)o.selected=true;status.append(o);});
+   const update=make('button','Update status');
+   update.addEventListener('click',async()=>{
+    update.disabled=true;try{await doc.ref.update({status:status.value,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});say('Order status updated.');}catch(e){say('Status update failed: '+e.message);}finally{update.disabled=false;}
+   });
+   const photo=make('button','Open customer photo'),receipt=make('button','Open payment receipt');
+   photo.addEventListener('click',()=>openPrivateFile(d.photoPath,'customer photo',photo));
+   receipt.addEventListener('click',()=>openPrivateFile(d.receiptPath,'payment receipt',receipt));
+   actions.append(status,update,photo,receipt);card.append(actions);ordersEl.append(card);
+  });
+ }catch(e){console.error(e);say('Could not load orders: '+e.message);}
+}
+async function openPrivateFile(path,label,button){
+ if(!path){say('No '+label+' was attached to this order.');return;}
+ button.disabled=true;
+ try{const url=await signedFile(path,label);window.location.href=url;}
+ catch(e){say(e.message);}
+ finally{button.disabled=false;}
+}
+</script></body></html>
